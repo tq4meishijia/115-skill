@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+
+# 测试与工具
+.pytest_cache/
+.coverage
+htmlcov/
+
+# 运行时凭据与配置（绝不入库）
+*.token
+credentials.json
+.pan115/
+
+# IDE / 系统
+.idea/
+.vscode/
+Thumbs.db
+.DS_Store
