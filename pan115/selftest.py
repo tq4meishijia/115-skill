@@ -406,6 +406,112 @@ def test_client_auth_refresh_failure():
             pass
 
 
+# ======================================================================
+# OpenList 公益服务（api.oplist.org）
+# ======================================================================
+def test_openlist_parse_callback():
+    import base64 as b64
+
+    from pan115.openlist import OpenListAuth
+
+    # 1) 成功 fragment（完整URL / 裸base64）
+    payload = {"access_token": "at-1234567890abcdef123456", "refresh_token": "rt-0987654321fedcba123456",
+               "driver_txt": "115cloud_go"}
+    frag = b64.b64encode(json.dumps(payload).encode()).decode()
+    for text in (f"https://api.oplist.org/#{frag}", frag):
+        data = OpenListAuth.parse_callback_input(text)
+        assert data["access_token"] == "at-1234567890abcdef123456"
+        assert data["refresh_token"] == "rt-0987654321fedcba123456"
+
+    # 2) 服务端失败形状（实测探针: message_err）→ 必须带出原因
+    err_payload = {"message_err": "授权失败，原因:\n1. 无效的授权码"}
+    with_url = "https://api.oplist.org/#" + b64.b64encode(json.dumps(err_payload).encode()).decode()
+    try:
+        OpenListAuth.parse_callback_input(with_url)
+        raise AssertionError("message_err 应抛 OpenListError")
+    except Exception as e:
+        assert "无效的授权码" in str(e)
+
+    # 3) 缺字段
+    frag3 = b64.b64encode(json.dumps({"access_token": "only-one-token-value-123"}).encode()).decode()
+    try:
+        OpenListAuth.parse_callback_input(frag3)
+        raise AssertionError("缺 refresh_token 应抛错")
+    except Exception:
+        pass
+
+    # 4) 直接一对令牌
+    data4 = OpenListAuth.parse_callback_input("at-1234567890abcdef rt-0987654321fedcba")
+    assert data4["access_token"].startswith("at-") and data4["refresh_token"].startswith("rt-")
+
+
+def test_openlist_authorize_parsing():
+    from pan115.openlist import OpenListAuth
+
+    # 实测探针响应（2026-11）：text 内嵌双重编码的 115 授权URL
+    text = ("https://115.com/?ac=open&redirect_uri="
+            "https%3A%2F%2Fpassportapi.115.com%2Fopen%2Fauthorize%3Fclient_id%3D100197303"
+            "%26state%3DPpGHHlV5R5fc5KdspXuxoeY6BdnOgMZiuPB15iNWI5skY7iSSFgfIKP1rxFLoMhM"
+            "%26response_type%3Dcode%26redirect_uri%3Dhttps%253A%252F%252Fapi.oplist.org%252F115cloud%252Fcallback")
+
+    class FakeResp:
+        def __init__(self, payload):
+            self._p = payload
+            self.text = json.dumps(payload)
+            self.status_code = 200
+
+        def json(self):
+            return self._p
+
+    class FakeSess:
+        def get(self, url, params=None, timeout=None, headers=None):
+            assert "/115cloud/requests" in url
+            assert params["server_use"] == "true" and params["driver_txt"] == "115cloud_go"
+            return FakeResp({"text": text})
+
+    ol = OpenListAuth(session=FakeSess())
+    info = ol.get_authorize_info()
+    assert info.client_id == "100197303"
+    assert info.state == "PpGHHlV5R5fc5KdspXuxoeY6BdnOgMZiuPB15iNWI5skY7iSSFgfIKP1rxFLoMhM"
+    assert info.callback_url == "https://api.oplist.org/115cloud/callback"
+    assert "/open/authorize" in info.authorize_url
+
+
+def test_openlist_renew_shapes():
+    from pan115.exceptions import Pan115Error
+    from pan115.openlist import OpenListAuth
+
+    class FakeResp:
+        def __init__(self, payload):
+            self._p = payload
+            self.text = json.dumps(payload)
+            self.status_code = 200
+
+        def json(self):
+            return self._p
+
+    class FakeSess:
+        def __init__(self, script):
+            self.script = script
+
+        def get(self, url, params=None, timeout=None, headers=None):
+            assert "/115cloud/renewapi" in url
+            assert params["apps_types"] == "115cloud_go" and params["refresh_ui"]
+            return FakeResp(self.script.pop(0))
+
+    # 成功形状
+    ol = OpenListAuth(session=FakeSess([{"access_token": "new-a", "refresh_token": "new-r"}]))
+    out = ol.renew("rt-old")
+    assert out == {"access_token": "new-a", "refresh_token": "new-r"}
+    # 失败形状（实测探针: {"text": "refresh_token 格式错误"}）
+    ol2 = OpenListAuth(session=FakeSess([{"text": "refresh_token 格式错误"}]))
+    try:
+        ol2.renew("bad-token")
+        raise AssertionError("失败形状应抛 OpenListError")
+    except Pan115Error as e:
+        assert "refresh_token 格式错误" in str(e)
+
+
 def run_all(verbose: bool = True) -> bool:
     """执行全部离线检查，返回是否全部通过。"""
     if verbose:
@@ -428,6 +534,9 @@ def run_all(verbose: bool = True) -> bool:
         ("客户端: 401自动刷新并重放", test_client_auto_refresh),
         ("客户端: 5xx指数退避重试", test_client_retry_on_5xx),
         ("客户端: 刷新失败->AuthError", test_client_auth_refresh_failure),
+        ("OpenList: 回调解析(4种输入)", test_openlist_parse_callback),
+        ("OpenList: 授权链接解析", test_openlist_authorize_parsing),
+        ("OpenList: 刷新成功/失败形状", test_openlist_renew_shapes),
     ]
     for name, fn in checks:
         check(name, fn)

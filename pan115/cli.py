@@ -196,6 +196,89 @@ def cmd_auth_logout(args) -> int:
     return 0
 
 
+def _base_from_args(args) -> str:
+    return args.base if getattr(args, "base", None) else "https://api.oplist.org"
+
+
+def cmd_auth_openlist(args) -> int:
+    """经 OpenList 公益服务获取令牌：/requests → 浏览器授权 → 回调解析 → 校验落盘"""
+    import webbrowser
+
+    from .openlist import OpenListAuth
+
+    pan = build_pan(args.verbose)
+    ol = OpenListAuth(base_url=_base_from_args(args))
+    try:
+        info = ol.get_authorize_info()
+    except Pan115Error as e:
+        print(f"[OpenList] 获取授权链接失败: {e}", file=sys.stderr)
+        return 2
+
+    print("\n== OpenList 公益授权（115cloud）==")
+    print(f"回调地址 : {info.callback_url or 'https://api.oplist.org/115cloud/callback'}")
+    print(f"AppID    : {info.client_id or '(服务端预设)'}")
+    print(f"\n请在浏览器打开以下链接并用 115 账号登录授权：\n  {info.login_url}\n")
+    if not args.no_open:
+        try:
+            webbrowser.open(info.login_url)
+        except Exception:  # noqa: BLE001
+            pass
+    print("完成授权后，把浏览器最终地址栏的完整URL粘贴到下面")
+    print("（形如 https://api.oplist.org/#eyJhY2Nlc3Nf...），")
+    print("或直接粘贴 Access Token 与 Refresh Token（两行/空格分隔）。")
+    try:
+        pasted = input("> ").strip()
+    except EOFError:
+        return 1
+    try:
+        data = OpenListAuth.parse_callback_input(pasted)
+    except Pan115Error as e:
+        print(f"[OpenList] 解析失败: {e}", file=sys.stderr)
+        return 2
+
+    access, refresh = data["access_token"], data["refresh_token"]
+    if not args.no_verify:
+        try:
+            probe = Pan115.from_tokens(access, refresh)
+            name = (probe.user.info().get("user_name_new")
+                    or probe.user.info().get("user_name") or probe.user.info().get("user_id"))
+            print(f"令牌校验通过 ✓  账号: {name}")
+        except Pan115Error as e:
+            print(f"[警告] 令牌校验失败（仍会保存，稍后可用 openlist-renew 重试）: {e}")
+    pan.client.set_tokens(access, refresh, 0)
+    print(f"令牌已保存: {pan.client.token_store.path}")
+    print("后续刷新可执行: python -m pan115 auth openlist-renew")
+    return 0
+
+
+def cmd_auth_openlist_renew(args) -> int:
+    """经 OpenList /renewapi 刷新令牌（纯程序化，无需浏览器）"""
+    from .openlist import OpenListAuth
+
+    pan = build_pan(args.verbose)
+    store = pan.client.token_store
+    refresh = args.refresh_token or store.get_refresh_token()
+    if not refresh:
+        print("没有可用的 refresh_token（本地未保存且未传 --refresh-token）。", file=sys.stderr)
+        return 2
+    ol = OpenListAuth(base_url=_base_from_args(args))
+    try:
+        tokens = ol.renew(refresh)
+    except Pan115Error as e:
+        print(f"[OpenList] {e}", file=sys.stderr)
+        print("提示：115 开放平台 2026-08-09 起暂停服务；若服务未恢复，刷新会持续失败。", file=sys.stderr)
+        return 2
+    pan.client.set_tokens(tokens["access_token"], tokens["refresh_token"], 0)
+    print("令牌已通过 OpenList 刷新并落盘 ✓")
+    if not args.no_verify:
+        try:
+            info = pan.user.info()
+            print(f"校验通过 ✓  账号: {info.get('user_name_new') or info.get('user_name')}")
+        except Pan115Error as e:
+            print(f"[警告] 校验失败: {e}")
+    return 0
+
+
 def cmd_user_info(args) -> int:
     pan = build_pan(args.verbose)
     require_auth(pan)
@@ -526,6 +609,16 @@ def build_parser() -> argparse.ArgumentParser:
     p1.set_defaults(func=cmd_auth_status)
     p1 = psub.add_parser("refresh", help="手动刷新 access_token", epilog="API: POST passportapi.115.com/open/refreshToken")
     p1.set_defaults(func=cmd_auth_refresh)
+    p1 = psub.add_parser("openlist", help="经 OpenList 公益服务(api.oplist.org)获取令牌", epilog="API: GET api.oplist.org/115cloud/requests → 浏览器授权 → 解析回调 /115cloud/callback 结果")
+    p1.add_argument("--base", default="", help="OpenList 服务地址（默认 https://api.oplist.org，可用 https://api.oplist.org.cn）")
+    p1.add_argument("--no-open", action="store_true", help="不自动打开浏览器")
+    p1.add_argument("--no-verify", action="store_true", help="跳过令牌校验直接保存")
+    p1.set_defaults(func=cmd_auth_openlist)
+    p1 = psub.add_parser("openlist-renew", help="经 OpenList /renewapi 程序化刷新令牌", epilog="API: GET api.oplist.org/115cloud/renewapi?apps_types=115cloud_go&refresh_ui=<token>&server_use=true")
+    p1.add_argument("--refresh-token", default="", help="不传则用本地已保存的 refresh_token")
+    p1.add_argument("--base", default="")
+    p1.add_argument("--no-verify", action="store_true")
+    p1.set_defaults(func=cmd_auth_openlist_renew)
     p1 = psub.add_parser("logout", help="清除本地凭据")
     p1.set_defaults(func=cmd_auth_logout)
 

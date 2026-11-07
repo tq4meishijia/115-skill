@@ -62,6 +62,31 @@ python -m pan115 auth status     # 查看授权状态与账号
 有服务端的 Web 应用可用授权码模式：`AuthManager.authorize_url(...)` 构造授权页 →
 回调拿 `code` → `auth.auth_code_to_token(...)` 换 token（`redirect_uri` 域名需先在开放平台「应用域名设置」登记）。
 
+### 方式二：OpenList 公益服务获取令牌（无需自己申请 AppID）
+
+适合没有 115 开放平台入驻资格/AppID 的用户，借助 OpenList 团队开源的公共服务
+（[OpenList-APIPages](https://github.com/OpenListTeam/OpenList-APIPages)）完成授权。
+
+**认证参数与请求方式**（三个端点均为 GET，driver 固定 `115cloud`）：
+
+| 步骤 | 请求 | 关键参数 | 返回 |
+|---|---|---|---|
+| ① 取授权链接 | `GET https://api.oplist.org/115cloud/requests` | `server_use=true&server_set=true&driver_txt=115cloud_go`（公益模式，无需 AppID；自备应用则传 `client_uid/client_key`） | `{"text": "https://115.com/?ac=open&redirect_uri=<115授权URL>"}`，内层含 `client_id=100197303`（OpenList 预设）与回调 `https://api.oplist.org/115cloud/callback` |
+| ② 用户授权（人工） | 浏览器打开 text URL | 115 账号登录并授权 | 115 回调到 `callback?code=xxx`，服务端用预设 Secret 换令牌后 302 到 `https://api.oplist.org/#<base64 JSON>` |
+| ③ 解析回调 | （本地解析，无请求） | 粘贴最终地址栏 URL / 纯 base64 / 原始 JSON / 一对令牌 | 成功 `{access_token, refresh_token}`；失败 `{message_err}` |
+| ④ 刷新令牌 | `GET https://api.oplist.org/115cloud/renewapi` | `apps_types=115cloud_go&refresh_ui=<refresh_token>&server_use=true` | 成功 `{access_token, refresh_token}`；失败 `{"text": "错误信息"}` |
+
+```bash
+python -m pan115 auth openlist          # 引导式：自动取链接开浏览器 → 粘贴回调URL/令牌 → 校验落盘
+python -m pan115 auth openlist-renew    # 纯程序化刷新（后续长期使用只靠这一条）
+```
+
+安全提示（引自 OpenList）：仅在官方站点（`api.oplist.org` / `api.oplist.org.cn`）或可信自建站点授权；
+不要分享包含令牌的回调链接；服务端声称不存储任何信息。
+
+> ⚠️ **服务可用性提醒**：115 官方公告自 2026-08-09 起 API 开放平台暂停服务。
+> 暂停期间②③④在 115 侧的交互可能失败（工具会原样透出服务端错误信息），恢复后无需改代码即可使用。
+
 ---
 
 ## 二、命令行速查
