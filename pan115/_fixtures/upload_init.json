@@ -1,0 +1,15 @@
+{
+  "state": 1,
+  "data": {
+    "pick_code": "ab12cd34",
+    "status": 1,
+    "sign_key": "sig-key-001",
+    "sign_check": "2392148-2392298",
+    "bucket": "fhnfile",
+    "object": "upload/0123456789ABCDEF0123456789ABCDEF01234567",
+    "callback": {
+      "callback": "https://uplb.115.com/3gupload/callback?data=xxx",
+      "callback_var": "{\"ocode\":\"ab12cd34\"}"
+    }
+  }
+}

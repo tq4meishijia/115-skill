@@ -1,0 +1,9 @@
+{
+  "state": 1,
+  "311001": {"id": "311001", "file_name": "旧目录", "type": "1", "file_size": "0", "dtime": "1731005000", "cid": "0", "parent_name": "根目录", "pick_code": "xy98765", "sha1": ""},
+  "311002": {"id": "311002", "file_name": "sample.mkv", "type": "1", "file_size": "1468006400", "dtime": "1731006000", "cid": "0", "parent_name": "根目录", "pick_code": "ab12cd34", "sha1": "0123456789ABCDEF0123456789ABCDEF01234567"},
+  "offset": 0,
+  "limit": 100,
+  "count": "2",
+  "rb_pass": 0
+}

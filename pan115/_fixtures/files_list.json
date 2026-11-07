@@ -1,0 +1,15 @@
+{
+  "state": 1,
+  "code": 0,
+  "message": "",
+  "data": [
+    {"fid": "311001", "aid": "1", "pid": "0", "fc": "0", "fn": "电影", "fs": 0, "pc": "", "sha1": "", "upt": 1731000000, "ico": "", "ism": "0"},
+    {"fid": "311002", "aid": "1", "pid": "0", "fc": "1", "fn": "sample.mkv", "fs": 1468006400, "pc": "ab12cd34", "sha1": "0123456789ABCDEF0123456789ABCDEF01234567", "upt": 1731001000, "ico": "mkv", "ism": "1"}
+  ],
+  "count": 2,
+  "sys_count": 0,
+  "offset": 0,
+  "limit": "200",
+  "cid": 0,
+  "is_asc": 1
+}

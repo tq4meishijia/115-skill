@@ -1,0 +1,16 @@
+[
+  {
+    "file_id": "311003",
+    "file_name": "资源片",
+    "size": "123456789",
+    "size_byte": 123456789,
+    "folder_count": 2,
+    "count": 12,
+    "pick_code": "zz876543",
+    "sha1": "",
+    "file_category": "0",
+    "ptime": "2024-11-01 10:00:00",
+    "utime": "2024-11-02 11:00:00",
+    "paths": [{"file_id": "0", "file_name": "根目录"}, {"file_id": "311003", "file_name": "资源片"}]
+  }
+]
