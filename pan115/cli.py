@@ -2,6 +2,7 @@
 
 用法（在项目根目录）：
     python -m pan115 --help
+    python -m pan115 auth quicklogin   # 快速扫码授权（首选）：出二维码文件 + 轮询落盘
     python -m pan115 auth login
     python -m pan115 ls /资源片
     python -m pan115 upload ./movie.mkv -t /电影
@@ -18,6 +19,7 @@ import json
 import os
 import sys
 import time
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from . import __version__
@@ -41,6 +43,10 @@ STATUS_TEXT = {
     QR_EXPIRED: "二维码已过期",
     QR_CANCELED: "已取消",
 }
+
+#: OpenList 公益服务(api.oplist.org)的服务端预设 AppID。未配置自有 AppID 时
+#: 可用它走设备码 PKCE 扫码授权（2026-11-07 实测可用）。
+OPENLIST_PRESET_CLIENT_ID = "100197303"
 
 
 # ======================================================================
@@ -158,6 +164,85 @@ def cmd_auth_login(args) -> int:
         print(f"  refresh_token: 已保存（轮换式，自动更新）")
     print(f"  凭据位置     : {pan.client.token_store.path}")
     return 0
+
+
+def _write_qr_file(content: str, out_path: str) -> str:
+    """把二维码内容渲染为图片文件：优先 PNG（需 pillow），缺 pillow 时写 SVG。"""
+    import qrcode  # 可选依赖：pip install qrcode pillow
+
+    target = Path(out_path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    png = target.with_suffix(".png")
+    try:
+        qrcode.make(content, box_size=12, border=4).save(png)
+        return str(png)
+    except Exception:  # noqa: BLE001  无 pillow 时退回 SVG（qrcode 纯 Python 可产）
+        import qrcode.image.svg  # noqa: F401  显式导入子模块
+
+        img = qrcode.make(content, image_factory=qrcode.image.svg.SvgPathImage)
+        svg = target.with_suffix(".svg")
+        svg.write_text(img.to_string().decode("utf-8"), encoding="utf-8")
+        return str(svg)
+
+
+def cmd_auth_quicklogin(args) -> int:
+    """快速扫码授权：设备码 PKCE 一体化 —— 起会话立即输出二维码文件，随后轮询落盘。
+
+    背景（2026-11-07 实测）：
+    - 设备码会话服务端 TTL 仅约 2 分钟，过期报 40199002 "key invalid"，
+      因此必须先出码、后轮询，且 timeout 默认压到 110s；
+    - OpenList 浏览器回调页(auth openlist)授权完成后会自动关窗，令牌来不及
+      复制，首次授权不要用它。
+
+    产出（QRCODE_FILE）交由上层按 WorkBuddy 内置图片浏览器(present_files)展示；
+    不要调用系统默认图片查看器，也不要在对话组件里内嵌本地图片（渲染不可靠）。
+    """
+    pan = build_pan(args.verbose)
+    client_id = args.client_id or pan.client.config.client_id or OPENLIST_PRESET_CLIENT_ID
+    if not (args.client_id or pan.client.config.client_id):
+        print(f"未配置自有 AppID，使用 OpenList 公益预设 AppID: {OPENLIST_PRESET_CLIENT_ID}")
+
+    device, verifier = pan.auth.device_code_begin(client_id)
+    qr_file = _write_qr_file(device.qrcode, args.qr_out)
+    print(f"QRCODE_URL:{device.qrcode}")
+    print(f"QRCODE_FILE:{Path(qr_file).resolve()}")
+    print("READY")
+
+    deadline = time.monotonic() + args.timeout
+    last: Optional[int] = None
+    while time.monotonic() < deadline:
+        try:
+            body = pan.auth.device_code_status(device)
+            status = pan.auth.parse_qr_status(body)
+        except AuthError as e:
+            print(f"[授权错误] {e}", file=sys.stderr)
+            print("提示: 设备码会话服务端约 2 分钟过期(如 40199002 key invalid)；"
+                  "请重新执行本命令并在出码后尽快扫码。", file=sys.stderr)
+            return 3
+        except Pan115Error:
+            # /get/status/ 是长轮询接口：无状态变化时服务端挂起连接，
+            # 客户端读超时(默认30s)属正常现象，继续轮询即可（与 auth.device_code_wait 一致）。
+            time.sleep(min(args.poll_interval, 2.0))
+            continue
+        if status != last:
+            print(f"  [{time.strftime('%H:%M:%S')}] {STATUS_TEXT.get(status, f'未知状态 {status}')}")
+            last = status
+        if status == QR_CONFIRMED:
+            tokens = pan.auth.device_code_to_token(device.uid, verifier)
+            pan.client.set_tokens(
+                tokens["access_token"],
+                tokens.get("refresh_token", ""),
+                int(tokens.get("expires_in", 0)),
+            )
+            print("\n授权成功 ✓")
+            print(f"  凭据位置: {pan.client.token_store.path}")
+            return 0
+        if status in (QR_EXPIRED, QR_CANCELED):
+            print("[授权错误] 二维码已过期或已取消，请重新执行本命令。", file=sys.stderr)
+            return 3
+        time.sleep(args.poll_interval)
+    print("[授权错误] 等待扫码超时，请重新执行本命令。", file=sys.stderr)
+    return 3
 
 
 def cmd_auth_status(args) -> int:
@@ -605,6 +690,12 @@ def build_parser() -> argparse.ArgumentParser:
     p1.add_argument("--poll-interval", type=float, default=2.0)
     p1.add_argument("--timeout", type=float, default=DEFAULT_AUTH_TIMEOUT)
     p1.set_defaults(func=cmd_auth_login)
+    p1 = psub.add_parser("quicklogin", help="快速扫码授权：起会话即出二维码文件，轮询后落盘（首次授权推荐）", epilog="API: POST passportapi.115.com/open/authDeviceCode; GET qrcodeapi.115.com/get/status/; POST passportapi.115.com/open/deviceCodeToToken")
+    p1.add_argument("--client-id", default="", help="自有 AppID；缺省回退 config.json，再回退 OpenList 预设 100197303")
+    p1.add_argument("--qr-out", default="qr_115.png", help="二维码图片输出路径（缺 pillow 时自动改写 .svg）")
+    p1.add_argument("--poll-interval", type=float, default=1.5)
+    p1.add_argument("--timeout", type=float, default=110.0, help="轮询上限秒数（设备码服务端 TTL 约 2 分钟，默认 110）")
+    p1.set_defaults(func=cmd_auth_quicklogin)
     p1 = psub.add_parser("status", help="查看授权状态与账号", epilog="API: GET proapi.115.com/open/user/info")
     p1.set_defaults(func=cmd_auth_status)
     p1 = psub.add_parser("refresh", help="手动刷新 access_token", epilog="API: POST passportapi.115.com/open/refreshToken")

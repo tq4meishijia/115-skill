@@ -48,16 +48,28 @@ python -m pan115 selftest        # 离线自检，应 17/17 通过
 
 或使用环境变量 `PAN115_CLIENT_ID` / `PAN115_CLIENT_SECRET`。
 
-### 授权登录（扫码 PKCE，推荐 CLI/桌面场景）
+### 授权登录（快速扫码 quicklogin，推荐首选）
 
 ```bash
-python -m pan115 auth login      # 展示二维码内容 -> 115生活App扫码 -> token 自动落盘
-python -m pan115 auth status     # 查看授权状态与账号
+python -m pan115 auth quicklogin --qr-out ./qr_115.png
+#   立即输出 QRCODE_URL / QRCODE_FILE(二维码图片) / READY，随后轮询；扫码确认后 token 自动落盘
+python -m pan115 auth status      # 查看授权状态与账号
 ```
 
-- 二维码内容是接口返回的 `qrcode` 字段，可用任意扫码工具展示；
+- 未配置自有 AppID 时自动回退 OpenList 公益预设 AppID `100197303`（走官方设备码 PKCE，2026-11-07 实测可用）；自有 AppID 用 `--client-id` 或 `~/.pan115/config.json`；
+- **时序约束（实测）**：设备码会话服务端 TTL 仅约 2 分钟（过期报 `40199002 key invalid`），出码须在起会话后数秒内完成、尽快扫码；二维码过期直接重跑本命令；
+- **长轮询说明**：`GET /get/status/` 无状态变化时服务端挂起连接，客户端 30s 读超时属正常，quicklogin 已内部容忍继续轮询；
+- 二维码内容是接口返回的 `qrcode` 字段，渲染为 PNG（需 `pip install qrcode pillow`，缺 pillow 自动改写 SVG）后用图片浏览器打开扫描即可；
 - token 保存于 `~/.pan115/credentials.json`（refresh_token 轮换式，客户端自动更新落盘）；
 - access_token 过期时**自动刷新并重放原请求**，无需人工干预。
+
+<details><summary>传统方式：auth login（分步扫码，等价但需自行展示二维码内容）</summary>
+
+```bash
+python -m pan115 auth login       # 展示二维码内容 -> 115生活App扫码 -> token 自动落盘
+```
+
+</details>
 
 有服务端的 Web 应用可用授权码模式：`AuthManager.authorize_url(...)` 构造授权页 →
 回调拿 `code` → `auth.auth_code_to_token(...)` 换 token（`redirect_uri` 域名需先在开放平台「应用域名设置」登记）。
@@ -66,6 +78,11 @@ python -m pan115 auth status     # 查看授权状态与账号
 
 适合没有 115 开放平台入驻资格/AppID 的用户，借助 OpenList 团队开源的公共服务
 （[OpenList-APIPages](https://github.com/OpenListTeam/OpenList-APIPages)）完成授权。
+
+> ⚠️ **实测提醒（2026-11-07）**：`auth openlist` 的浏览器回调最终页在授权完成后会**自动关窗**，
+> 令牌来不及复制（实测两次丢失）。**首次授权请改用 `auth quicklogin`**（同样免 AppID，
+> 复用 OpenList 预设 AppID 走官方设备码 PKCE，无需浏览器）。本方式仅建议用于
+> `auth openlist-renew` 刷新令牌。
 
 **认证参数与请求方式**（三个端点均为 GET，driver 固定 `115cloud`）：
 
@@ -84,8 +101,9 @@ python -m pan115 auth openlist-renew    # 纯程序化刷新（后续长期使�
 安全提示（引自 OpenList）：仅在官方站点（`api.oplist.org` / `api.oplist.org.cn`）或可信自建站点授权；
 不要分享包含令牌的回调链接；服务端声称不存储任何信息。
 
-> ⚠️ **服务可用性提醒**：115 官方公告自 2026-08-09 起 API 开放平台暂停服务。
-> 暂停期间②③④在 115 侧的交互可能失败（工具会原样透出服务端错误信息），恢复后无需改代码即可使用。
+> ✅ **服务可用性更新（2026-11-07 实测）**：此前公告的 2026-08-09 暂停已结束，认证链路
+> （authDeviceCode / get/status / deviceCodeToToken / refreshToken）与业务接口均恢复正常。
+> 如遇官方再次维护，工具会原样透出服务端错误信息，恢复后无需改代码即可使用。
 
 ---
 
