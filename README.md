@@ -33,8 +33,20 @@
 
 ```bash
 pip install -r requirements.txt
-python -m pan115 selftest        # 离线自检，应 17/17 通过
+python -m pan115 selftest        # 离线自检，应 20/20 通过
 ```
+
+### WorkBuddy Skill 分发包
+
+本仓库同时托管 skill 本体，与安装目录 `~/.workbuddy/skills/pan115/` 保持一致：
+
+| 路径 | 用途 |
+|---|---|
+| `SKILL.md` | 技能定义与操作纪律（含二维码必须经 WorkBuddy 内置图片浏览器展示、禁用系统查看器等约束） |
+| `references/api-map.md` | 功能 ↔ API 对照与错误码说明 |
+| `dist/pan115.zip` | 可直接安装的分发包（约 65KB），布局 `pan115/SKILL.md` + `pan115/references/*` + `pan115/scripts/**` |
+
+安装方式：解压 zip，把 `pan115/` 目录放到 `~/.workbuddy/skills/` 下即可；首次授权见下文 `auth quicklogin`。
 
 ### 获取凭据（一次性）
 

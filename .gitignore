@@ -3,7 +3,9 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 build/
-dist/
+# 构建产物（技能分发包需入库，单独放行）
+dist/*
+!dist/pan115.zip
 .venv/
 venv/
 
