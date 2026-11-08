@@ -6,6 +6,7 @@
     python -m pan115 auth login
     python -m pan115 ls /资源片
     python -m pan115 upload ./movie.mkv -t /电影
+    python -m pan115 backup run             # 定时自动备份（配置驱动，单向只增）
     python -m pan115 --selftest     # 离线自检（不需要凭据与网络）
 
 每个子命令的 --help 末尾都标注了对应的官方 API 端点；
@@ -659,6 +660,12 @@ def cmd_config_show(args) -> int:
     return 0
 
 
+def cmd_backup(args) -> int:
+    """定时自动备份入口。退出码语义由 backup 子包内部完整定义并返回。"""
+    from .backup import dispatch as backup_dispatch
+    return backup_dispatch(args)
+
+
 # ======================================================================
 # 自检（离线，不需要凭据与网络）
 # ======================================================================
@@ -866,6 +873,23 @@ def build_parser() -> argparse.ArgumentParser:
     # ---- 分享 ----
     p = sub.add_parser("share", help="分享管理(官方API未开放,预留)")
     p.set_defaults(func=cmd_share)
+
+    # ---- 定时自动备份（单向只增上传，<=1 QPS）----
+    p = sub.add_parser("backup", help="定时自动备份(单向只增上传,<=1 QPS)",
+                       epilog="API: /open/upload/init; /open/upload/get_token; /open/ufile/files; /open/folder/add")
+    psub = p.add_subparsers(dest="action", required=True)
+    p1 = psub.add_parser("run", help="执行一次备份(配置驱动,内部完整映射退出码)")
+    p1.add_argument("--config", default="", help="备份配置绝对路径(缺省 ~/.pan115/backup/config.json)")
+    p1.set_defaults(func=cmd_backup)
+    p1 = psub.add_parser("status", help="查看上次运行摘要(不产生 API 请求)")
+    p1.add_argument("--config", default="")
+    p1.set_defaults(func=cmd_backup)
+    p1 = psub.add_parser("doctor", help="离线体检(依赖/配置/凭据/红线,不触网)")
+    p1.add_argument("--config", default="")
+    p1.set_defaults(func=cmd_backup)
+    p1 = psub.add_parser("selftest", help="备份能力离线自检(不需要凭据与网络)")
+    p1.add_argument("--quiet", action="store_true")
+    p1.set_defaults(func=cmd_backup)
 
     # ---- 配置/自检 ----
     p = sub.add_parser("config", help="查看配置")

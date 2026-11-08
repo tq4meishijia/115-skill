@@ -16,8 +16,10 @@
 │   ├── ratelimit.py           # 令牌桶客户端限速
 │   ├── oss.py                 # 阿里云 OSS V1 签名 + 直传(PutObject/分片/回调/STS过期重试)
 │   ├── exceptions.py          # 异常体系
-│   ├── selftest.py            # 17 项离线自检（无凭据无网络可跑）
+│   ├── selftest.py            # 20 项离线自检（无凭据无网络可跑）
 │   ├── cli.py / __main__.py   # 命令行工具
+│   ├── backup/                # 定时自动备份（配置驱动、单向只增、<=1 QPS）
+│   │   └── settings / pacing / state / planner / remote_index / governor / uploader / reporter / selftest / cli
 │   └── api/
 │       ├── user.py  fs.py  upload.py  download.py
 │       ├── recycle.py  video.py  offline.py  share.py(预留)
@@ -42,9 +44,9 @@ python -m pan115 selftest        # 离线自检，应 20/20 通过
 
 | 路径 | 用途 |
 |---|---|
-| `SKILL.md` | 技能定义与操作纪律（含二维码必须经 WorkBuddy 内置图片浏览器展示、禁用系统查看器等约束） |
-| `references/api-map.md` | 功能 ↔ API 对照与错误码说明 |
-| `dist/pan115.zip` | 可直接安装的分发包（约 65KB），布局 `pan115/SKILL.md` + `pan115/references/*` + `pan115/scripts/**` |
+| `SKILL.md` | 技能定义与操作纪律（含二维码必须经 WorkBuddy 内置图片浏览器展示、禁用系统查看器等约束；含定时自动备份章节） |
+| `references/*.md` | `api-map.md` 功能 ↔ API 对照；`backup-design.md` / `backup-throttle.md` / `backup-scheduling.md` 备份设计与调度说明 |
+| `dist/pan115.zip` | 可直接安装的分发包（42 条目，约 121KB），布局 `pan115/SKILL.md` + `pan115/references/*` + `pan115/scripts/**`（含 `backup/` 子包） |
 
 安装方式：解压 zip，把 `pan115/` 目录放到 `~/.workbuddy/skills/` 下即可；首次授权见下文 `auth quicklogin`。
 
@@ -154,7 +156,15 @@ python -m pan115 offline delete <info_hash> --del-files   # 删任务（可连�
 python -m pan115 offline quota                   # 配额
 
 python -m pan115 share                        # 分享管理：官方 API 未开放（见下文）
+
+# 定时自动备份（配置驱动，单向只增，绝不删云端文件）
+python -m pan115 backup doctor                # 离线体检：依赖/配置/凭据/红线（不触网）
+python -m pan115 backup selftest              # 备份能力离线自检，应 25/25 通过
+python -m pan115 backup status                # 查看上次运行摘要（不产生 API 请求）
+python -m pan115 backup run                   # 执行一次备份（建议由应用内定时任务触发）
 ```
+
+> 备份硬约束：`api_max_qps ≤ 1.0`、并发 1、最小请求间隔 1100 ms，越界直接报错退出；调度配置见 `references/backup-scheduling.md`。
 
 ---
 
@@ -305,8 +315,9 @@ pan.find_pick_code("sample.mkv")             # 文件名 -> 提取码
 ## 六、测试与质量
 
 ```bash
-python -m pan115 selftest     # 17 项离线自检（推荐 CI 使用）
-pytest tests/ -v              # pytest 入口，同一套用例
+python -m pan115 selftest            # 20 项离线自检（推荐 CI 使用）
+python -m pan115 backup selftest     # 备份能力 25 项离线自检（含故障注入）
+pytest tests/ -v                     # pytest 入口，同一套用例
 ```
 
 离线覆盖：PKCE(RFC 7636 向量)、令牌桶、401 错误码识别、文件列表/回收站/目录详情（含空数组形状）解析、

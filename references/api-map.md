@@ -79,6 +79,29 @@
 
 官方开放平台**尚未发布分享 API**（能力列表中为"计划开放"）。工具预留接口，不支持分享操作；勿用非公开接口实现（开发者协议 4.3 条禁止）。
 
+## 8. 定时自动备份涉及的端点（backup 子命令）
+
+> 全部 `/open/` 请求经 `backup.governor.Governor` 唯一网关并计入 `N_api`，
+> 合计 **≤ 1 QPS**（官方未公开 QPS 数值，2 QPS 仅为用户设定的工程假设）。
+> 详见 `references/backup-design.md` / `backup-throttle.md`。
+
+| 端点 | 用途 | 计入 1 QPS 预算 | 备注 |
+|---|---|---|---|
+| `POST /open/upload/init` | 秒传判定 / 二次校验 | **是** | `status=2` 秒传（1 次 API、0 字节传输）；`6/7/8` 为二次校验非频控码 |
+| `GET /open/upload/get_token` | 取 OSS STS 凭证 | **是** | 仅秒传未命中时才调用 |
+| `POST /open/upload/resume` | 大文件断点续传查询 | **是** | 按 SHA1 查询既有对象 |
+| `GET /open/ufile/files` | 每轮实时分页拉远端清单 | **是** | `limit/offset`，`page_size=200`；建 SHA1 / 名称双索引 |
+| `POST /open/folder/add` | 逐级创建目标目录 | **是** | 云端永不删 |
+| `POST /open/folder/get_info` | 按路径解析目录 ID | **是** | 不存在返回空数组 → `ObjectNotFoundError` |
+| `GET /open/user/info` | 频控恢复的单发探测 | **是** | 0.5 QPS / 2000 ms 单发；探测也守 G1 |
+| 阿里云 OSS `PutObject` / 分片 | 真实字节传输 | **否** | 不经 `proapi.115.com`，不占 115 QPS（并发 2） |
+| 本地 SHA1 / tar 构建 | 本地 CPU/IO | **否** | 0 API（并发 2） |
+
+**频控判据**：HTTP 429 之外，业务码 `770004`（访问频率过高）/ `406`（已达到当前访问上限）
+也视为频控（社区实测，非官方公布值）。现有 `client.py` 只认 HTTP 429，备份在 governor 层补齐
+业务码识别，不改 `client.py` 源码。触发后进入 COOLDOWN 300 s 起 → 单发探测 × 5 轮 →
+RAMP 0.5→1.0 QPS，连续 3 轮探测失败熔断退出 3。
+
 ## 错误处理与重试（client.py）
 
 - 通用响应：`{"state": true|1, "code": 0, "data": ...}`；`state=false` 即失败。
